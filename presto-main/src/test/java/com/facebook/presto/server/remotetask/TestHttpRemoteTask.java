@@ -36,6 +36,7 @@ import com.facebook.presto.common.ErrorCode;
 import com.facebook.presto.common.type.Type;
 import com.facebook.presto.common.type.TypeManager;
 import com.facebook.presto.connector.ConnectorCodecManager;
+import com.facebook.presto.connector.ConnectorManager;
 import com.facebook.presto.execution.Lifespan;
 import com.facebook.presto.execution.NodeTaskMap;
 import com.facebook.presto.execution.QueryManagerConfig;
@@ -62,6 +63,7 @@ import com.facebook.presto.server.TaskUpdateRequest;
 import com.facebook.presto.server.thrift.ConnectorSplitThriftCodec;
 import com.facebook.presto.server.thrift.DeleteTableHandleThriftCodec;
 import com.facebook.presto.server.thrift.InsertTableHandleThriftCodec;
+import com.facebook.presto.server.thrift.MergeTableHandleThriftCodec;
 import com.facebook.presto.server.thrift.OutputTableHandleThriftCodec;
 import com.facebook.presto.server.thrift.TableHandleThriftCodec;
 import com.facebook.presto.server.thrift.TableLayoutHandleThriftCodec;
@@ -69,6 +71,7 @@ import com.facebook.presto.server.thrift.TransactionHandleThriftCodec;
 import com.facebook.presto.spi.ConnectorDeleteTableHandle;
 import com.facebook.presto.spi.ConnectorId;
 import com.facebook.presto.spi.ConnectorInsertTableHandle;
+import com.facebook.presto.spi.ConnectorMergeTableHandle;
 import com.facebook.presto.spi.ConnectorOutputTableHandle;
 import com.facebook.presto.spi.ConnectorSplit;
 import com.facebook.presto.spi.ConnectorTableHandle;
@@ -154,7 +157,8 @@ public class TestHttpRemoteTask
     private static final TaskManagerConfig TASK_MANAGER_CONFIG = new TaskManagerConfig()
             // Shorten status refresh wait and info update interval so that we can have a shorter test timeout
             .setStatusRefreshMaxWait(new Duration(IDLE_TIMEOUT.roundTo(MILLISECONDS) / 100, MILLISECONDS))
-            .setInfoUpdateInterval(new Duration(IDLE_TIMEOUT.roundTo(MILLISECONDS) / 10, MILLISECONDS));
+            .setInfoUpdateInterval(new Duration(IDLE_TIMEOUT.roundTo(MILLISECONDS) / 10, MILLISECONDS))
+            .setEventLoopEnabled(false);
 
     private static final boolean TRACE_HTTP = false;
 
@@ -367,6 +371,7 @@ public class TestHttpRemoteTask
                     @Override
                     public void configure(Binder binder)
                     {
+                        binder.bind(ConnectorManager.class).toProvider(() -> null).in(Scopes.SINGLETON);
                         binder.bind(JsonMapper.class);
                         binder.bind(ThriftMapper.class);
                         configBinder(binder).bindConfig(FeaturesConfig.class);
@@ -390,6 +395,7 @@ public class TestHttpRemoteTask
                         jsonCodecBinder(binder).bindJsonCodec(ConnectorOutputTableHandle.class);
                         jsonCodecBinder(binder).bindJsonCodec(ConnectorDeleteTableHandle.class);
                         jsonCodecBinder(binder).bindJsonCodec(ConnectorInsertTableHandle.class);
+                        jsonCodecBinder(binder).bindJsonCodec(ConnectorMergeTableHandle.class);
                         jsonCodecBinder(binder).bindJsonCodec(ConnectorTableHandle.class);
                         jsonCodecBinder(binder).bindJsonCodec(ConnectorTableLayoutHandle.class);
 
@@ -400,6 +406,7 @@ public class TestHttpRemoteTask
                         thriftCodecBinder(binder).bindCustomThriftCodec(OutputTableHandleThriftCodec.class);
                         thriftCodecBinder(binder).bindCustomThriftCodec(InsertTableHandleThriftCodec.class);
                         thriftCodecBinder(binder).bindCustomThriftCodec(DeleteTableHandleThriftCodec.class);
+                        thriftCodecBinder(binder).bindCustomThriftCodec(MergeTableHandleThriftCodec.class);
                         thriftCodecBinder(binder).bindCustomThriftCodec(TableHandleThriftCodec.class);
                         thriftCodecBinder(binder).bindCustomThriftCodec(TableLayoutHandleThriftCodec.class);
                         thriftCodecBinder(binder).bindThriftCodec(TaskStatus.class);
@@ -462,7 +469,7 @@ public class TestHttpRemoteTask
         return injector.getInstance(HttpRemoteTaskFactory.class);
     }
 
-    private static void poll(BooleanSupplier success)
+    static void poll(BooleanSupplier success)
             throws InterruptedException
     {
         long failAt = System.nanoTime() + FAIL_TIMEOUT.roundTo(NANOSECONDS);
@@ -476,7 +483,7 @@ public class TestHttpRemoteTask
         }
     }
 
-    private static void waitUntilIdle(AtomicLong lastActivityNanos)
+    static void waitUntilIdle(AtomicLong lastActivityNanos)
             throws InterruptedException
     {
         long startTimeNanos = System.nanoTime();
@@ -496,7 +503,7 @@ public class TestHttpRemoteTask
         }
     }
 
-    private enum FailureScenario
+    enum FailureScenario
     {
         NO_FAILURE,
         TASK_MISMATCH,
@@ -549,6 +556,7 @@ public class TestHttpRemoteTask
         }
 
         Map<PlanNodeId, TaskSource> taskSourceMap = new HashMap<>();
+        private TaskUpdateRequest lastTaskUpdateRequest;
 
         @POST
         @Path("{taskId}")
@@ -559,6 +567,7 @@ public class TestHttpRemoteTask
                 TaskUpdateRequest taskUpdateRequest,
                 @Context UriInfo uriInfo)
         {
+            this.lastTaskUpdateRequest = taskUpdateRequest;
             for (TaskSource source : taskUpdateRequest.getSources()) {
                 taskSourceMap.compute(source.getPlanNodeId(), (planNodeId, taskSource) -> taskSource == null ? source : taskSource.update(source));
             }
@@ -573,6 +582,11 @@ public class TestHttpRemoteTask
                 return null;
             }
             return new TaskSource(source.getPlanNodeId(), source.getSplits(), source.getNoMoreSplitsForLifespan(), source.isNoMoreSplits());
+        }
+
+        public synchronized TaskUpdateRequest getLastTaskUpdateRequest()
+        {
+            return lastTaskUpdateRequest;
         }
 
         @GET

@@ -131,10 +131,10 @@ void from_json(const json& j, IcebergTableName& p);
 namespace facebook::presto::protocol::iceberg {
 enum class PartitionTransformType {
   IDENTITY,
-  YEAR,
-  MONTH,
-  DAY,
   HOUR,
+  DAY,
+  MONTH,
+  YEAR,
   BUCKET,
   TRUNCATE
 };
@@ -206,6 +206,7 @@ struct IcebergInsertTableHandle : public ConnectorInsertTableHandle {
   hive::HiveCompressionCodec compressionCodec = {};
   Map<String, String> storageProperties = {};
   List<SortField> sortOrder = {};
+  std::shared_ptr<SchemaTableName> materializedViewName = {};
 
   IcebergInsertTableHandle() noexcept;
 };
@@ -270,6 +271,7 @@ struct IcebergTableHandle : public ConnectorTableHandle {
   std::shared_ptr<List<Integer>> equalityFieldIds = {};
   List<SortField> sortOrder = {};
   List<IcebergColumnHandle> updatedColumns = {};
+  std::shared_ptr<SchemaTableName> materializedViewName = {};
 
   IcebergTableHandle() noexcept;
 };

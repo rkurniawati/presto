@@ -35,6 +35,7 @@ import com.facebook.presto.common.ErrorCode;
 import com.facebook.presto.common.type.Type;
 import com.facebook.presto.common.type.TypeManager;
 import com.facebook.presto.connector.ConnectorCodecManager;
+import com.facebook.presto.connector.ConnectorManager;
 import com.facebook.presto.execution.Lifespan;
 import com.facebook.presto.execution.NodeTaskMap;
 import com.facebook.presto.execution.QueryManagerConfig;
@@ -60,6 +61,7 @@ import com.facebook.presto.server.TaskUpdateRequest;
 import com.facebook.presto.server.thrift.ConnectorSplitThriftCodec;
 import com.facebook.presto.server.thrift.DeleteTableHandleThriftCodec;
 import com.facebook.presto.server.thrift.InsertTableHandleThriftCodec;
+import com.facebook.presto.server.thrift.MergeTableHandleThriftCodec;
 import com.facebook.presto.server.thrift.OutputTableHandleThriftCodec;
 import com.facebook.presto.server.thrift.TableHandleThriftCodec;
 import com.facebook.presto.server.thrift.TableLayoutHandleThriftCodec;
@@ -67,6 +69,7 @@ import com.facebook.presto.server.thrift.TransactionHandleThriftCodec;
 import com.facebook.presto.spi.ConnectorDeleteTableHandle;
 import com.facebook.presto.spi.ConnectorId;
 import com.facebook.presto.spi.ConnectorInsertTableHandle;
+import com.facebook.presto.spi.ConnectorMergeTableHandle;
 import com.facebook.presto.spi.ConnectorOutputTableHandle;
 import com.facebook.presto.spi.ConnectorSplit;
 import com.facebook.presto.spi.ConnectorTableHandle;
@@ -375,6 +378,7 @@ public class TestHttpRemoteTaskWithEventLoop
                     @Override
                     public void configure(Binder binder)
                     {
+                        binder.bind(ConnectorManager.class).toProvider(() -> null).in(Scopes.SINGLETON);
                         binder.bind(JsonMapper.class);
                         binder.bind(ThriftMapper.class);
                         configBinder(binder).bindConfig(FeaturesConfig.class);
@@ -398,6 +402,7 @@ public class TestHttpRemoteTaskWithEventLoop
                         jsonCodecBinder(binder).bindJsonCodec(ConnectorOutputTableHandle.class);
                         jsonCodecBinder(binder).bindJsonCodec(ConnectorDeleteTableHandle.class);
                         jsonCodecBinder(binder).bindJsonCodec(ConnectorInsertTableHandle.class);
+                        jsonCodecBinder(binder).bindJsonCodec(ConnectorMergeTableHandle.class);
                         jsonCodecBinder(binder).bindJsonCodec(ConnectorTableHandle.class);
                         jsonCodecBinder(binder).bindJsonCodec(ConnectorTableLayoutHandle.class);
 
@@ -408,6 +413,7 @@ public class TestHttpRemoteTaskWithEventLoop
                         thriftCodecBinder(binder).bindCustomThriftCodec(OutputTableHandleThriftCodec.class);
                         thriftCodecBinder(binder).bindCustomThriftCodec(InsertTableHandleThriftCodec.class);
                         thriftCodecBinder(binder).bindCustomThriftCodec(DeleteTableHandleThriftCodec.class);
+                        thriftCodecBinder(binder).bindCustomThriftCodec(MergeTableHandleThriftCodec.class);
                         thriftCodecBinder(binder).bindCustomThriftCodec(TableHandleThriftCodec.class);
                         thriftCodecBinder(binder).bindCustomThriftCodec(TableLayoutHandleThriftCodec.class);
                         thriftCodecBinder(binder).bindThriftCodec(TaskStatus.class);

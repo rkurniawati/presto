@@ -77,18 +77,20 @@ import com.facebook.presto.parquet.cache.MetadataReader;
 import com.facebook.presto.parquet.cache.ParquetCacheConfig;
 import com.facebook.presto.parquet.cache.ParquetFileMetadata;
 import com.facebook.presto.parquet.cache.ParquetMetadataSource;
+import com.facebook.presto.spi.MaterializedViewDefinition;
 import com.facebook.presto.spi.connector.ConnectorNodePartitioningProvider;
 import com.facebook.presto.spi.connector.ConnectorPageSinkProvider;
 import com.facebook.presto.spi.connector.ConnectorPageSourceProvider;
 import com.facebook.presto.spi.connector.ConnectorPlanOptimizerProvider;
 import com.facebook.presto.spi.connector.ConnectorSplitManager;
-import com.facebook.presto.spi.procedure.Procedure;
+import com.facebook.presto.spi.procedure.BaseProcedure;
 import com.facebook.presto.spi.statistics.ColumnStatistics;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import com.google.inject.Binder;
 import com.google.inject.Provides;
 import com.google.inject.Scopes;
+import com.google.inject.TypeLiteral;
 import com.google.inject.multibindings.Multibinder;
 import jakarta.inject.Singleton;
 import org.weakref.jmx.MBeanExporter;
@@ -166,6 +168,7 @@ public class IcebergCommonModule
         configBinder(binder).bindConfig(ParquetFileWriterConfig.class);
 
         jsonCodecBinder(binder).bindJsonCodec(CommitTaskData.class);
+        jsonCodecBinder(binder).bindListJsonCodec(MaterializedViewDefinition.ColumnMapping.class);
 
         binder.bind(FileFormatDataSourceStats.class).in(Scopes.SINGLETON);
         newExporter(binder).export(FileFormatDataSourceStats.class).withGeneratedName();
@@ -173,7 +176,7 @@ public class IcebergCommonModule
         binder.bind(IcebergFileWriterFactory.class).in(Scopes.SINGLETON);
         newExporter(binder).export(IcebergFileWriterFactory.class).withGeneratedName();
 
-        Multibinder<Procedure> procedures = newSetBinder(binder, Procedure.class);
+        Multibinder<BaseProcedure<?>> procedures = newSetBinder(binder, new TypeLiteral<BaseProcedure<?>>() {});
         procedures.addBinding().toProvider(RollbackToSnapshotProcedure.class).in(Scopes.SINGLETON);
         procedures.addBinding().toProvider(RollbackToTimestampProcedure.class).in(Scopes.SINGLETON);
         procedures.addBinding().toProvider(RegisterTableProcedure.class).in(Scopes.SINGLETON);

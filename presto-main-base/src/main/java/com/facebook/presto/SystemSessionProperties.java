@@ -29,6 +29,7 @@ import com.facebook.presto.memory.MemoryManagerConfig;
 import com.facebook.presto.memory.NodeMemoryConfig;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.eventlistener.CTEInformation;
+import com.facebook.presto.spi.security.ViewSecurity;
 import com.facebook.presto.spi.session.PropertyMetadata;
 import com.facebook.presto.spiller.NodeSpillConfig;
 import com.facebook.presto.sql.analyzer.FeaturesConfig;
@@ -49,7 +50,6 @@ import com.facebook.presto.sql.analyzer.FeaturesConfig.ShardedJoinStrategy;
 import com.facebook.presto.sql.analyzer.FeaturesConfig.SingleStreamSpillerChoice;
 import com.facebook.presto.sql.analyzer.FunctionsConfig;
 import com.facebook.presto.sql.planner.CompilerConfig;
-import com.facebook.presto.sql.tree.CreateView;
 import com.facebook.presto.tracing.TracingConfig;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
@@ -89,6 +89,7 @@ import static java.util.stream.Collectors.joining;
 
 public final class SystemSessionProperties
 {
+    public static final String MAX_PREFIXES_COUNT = "max_prefixes_count";
     public static final String OPTIMIZE_HASH_GENERATION = "optimize_hash_generation";
     public static final String JOIN_DISTRIBUTION_TYPE = "join_distribution_type";
     public static final String JOIN_MAX_BROADCAST_TABLE_SIZE = "join_max_broadcast_table_size";
@@ -244,6 +245,8 @@ public final class SystemSessionProperties
     public static final String MATERIALIZED_VIEW_DATA_CONSISTENCY_ENABLED = "materialized_view_data_consistency_enabled";
     public static final String CONSIDER_QUERY_FILTERS_FOR_MATERIALIZED_VIEW_PARTITIONS = "consider-query-filters-for-materialized-view-partitions";
     public static final String QUERY_OPTIMIZATION_WITH_MATERIALIZED_VIEW_ENABLED = "query_optimization_with_materialized_view_enabled";
+    public static final String LEGACY_MATERIALIZED_VIEWS = "legacy_materialized_views";
+    public static final String MATERIALIZED_VIEW_ALLOW_FULL_REFRESH_ENABLED = "materialized_view_allow_full_refresh_enabled";
     public static final String AGGREGATION_IF_TO_FILTER_REWRITE_STRATEGY = "aggregation_if_to_filter_rewrite_strategy";
     public static final String JOINS_NOT_NULL_INFERENCE_STRATEGY = "joins_not_null_inference_strategy";
     public static final String RESOURCE_AWARE_SCHEDULING_STRATEGY = "resource_aware_scheduling_strategy";
@@ -260,6 +263,7 @@ public final class SystemSessionProperties
     public static final String HYPERLOGLOG_STANDARD_ERROR_WARNING_THRESHOLD = "hyperloglog_standard_error_warning_threshold";
     public static final String PREFER_MERGE_JOIN_FOR_SORTED_INPUTS = "prefer_merge_join_for_sorted_inputs";
     public static final String PREFER_SORT_MERGE_JOIN = "prefer_sort_merge_join";
+    public static final String SORTED_EXCHANGE_ENABLED = "sorted_exchange_enabled";
     public static final String SEGMENTED_AGGREGATION_ENABLED = "segmented_aggregation_enabled";
     public static final String USE_HISTORY_BASED_PLAN_STATISTICS = "use_history_based_plan_statistics";
     public static final String TRACK_HISTORY_BASED_PLAN_STATISTICS = "track_history_based_plan_statistics";
@@ -336,6 +340,7 @@ public final class SystemSessionProperties
     public static final String WARN_ON_COMMON_NAN_PATTERNS = "warn_on_common_nan_patterns";
     public static final String INLINE_PROJECTIONS_ON_VALUES = "inline_projections_on_values";
     public static final String INCLUDE_VALUES_NODE_IN_CONNECTOR_OPTIMIZER = "include_values_node_in_connector_optimizer";
+    public static final String ENABLE_EMPTY_CONNECTOR_OPTIMIZER = "enable_empty_connector_optimizer";
     public static final String SINGLE_NODE_EXECUTION_ENABLED = "single_node_execution_enabled";
     public static final String BROADCAST_SEMI_JOIN_FOR_DELETE = "broadcast_semi_join_for_delete";
     public static final String EXPRESSION_OPTIMIZER_NAME = "expression_optimizer_name";
@@ -349,6 +354,7 @@ public final class SystemSessionProperties
 
     // TODO: Native execution related session properties that are temporarily put here. They will be relocated in the future.
     public static final String NATIVE_AGGREGATION_SPILL_ALL = "native_aggregation_spill_all";
+    public static final String NATIVE_MAX_SPLIT_PRELOAD_PER_DRIVER = "native_max_split_preload_per_driver";
     public static final String NATIVE_EXECUTION_ENABLED = "native_execution_enabled";
     private static final String NATIVE_EXECUTION_EXECUTABLE_PATH = "native_execution_executable_path";
     private static final String NATIVE_EXECUTION_PROGRAM_ARGUMENTS = "native_execution_program_arguments";
@@ -395,6 +401,11 @@ public final class SystemSessionProperties
             HistoryBasedOptimizationConfig historyBasedOptimizationConfig)
     {
         sessionProperties = ImmutableList.of(
+                integerProperty(
+                        MAX_PREFIXES_COUNT,
+                        "Maximum number of prefixes (catalog/schema/table scopes used to narrow metadata lookups) that Presto generates when querying information_schema.",
+                        featuresConfig.getMaxPrefixesCount(),
+                        false),
                 stringProperty(
                         EXECUTION_POLICY,
                         "Policy used for scheduling query tasks",
@@ -1353,6 +1364,29 @@ public final class SystemSessionProperties
                         "Enable query optimization with materialized view",
                         featuresConfig.isQueryOptimizationWithMaterializedViewEnabled(),
                         true),
+                new PropertyMetadata<>(
+                        LEGACY_MATERIALIZED_VIEWS,
+                        "Experimental: Use legacy materialized views.  This feature is under active development and may change " +
+                                "or be removed at any time.  Do not disable in production environments. " +
+                                "To allow toggling this property via session, set experimental.allow-legacy-materialized-views-toggle=true in config.",
+                        BOOLEAN,
+                        Boolean.class,
+                        featuresConfig.isLegacyMaterializedViews(),
+                        true,
+                        value -> {
+                            if (!featuresConfig.isAllowLegacyMaterializedViewsToggle()) {
+                                throw new PrestoException(INVALID_SESSION_PROPERTY,
+                                        "Cannot toggle legacy_materialized_views session property. " +
+                                        "Set experimental.allow-legacy-materialized-views-toggle=true in config to allow changing this setting.");
+                            }
+                            return (Boolean) value;
+                        },
+                        object -> object),
+                booleanProperty(
+                        MATERIALIZED_VIEW_ALLOW_FULL_REFRESH_ENABLED,
+                        "Allow full refresh of MV when it's empty - potentially high cost.",
+                        featuresConfig.isMaterializedViewAllowFullRefreshEnabled(),
+                        true),
                 stringProperty(
                         DISTRIBUTED_TRACING_MODE,
                         "Mode for distributed tracing. NO_TRACE, ALWAYS_TRACE, or SAMPLE_BASED",
@@ -1399,6 +1433,11 @@ public final class SystemSessionProperties
                         "Prefer sort merge join for all joins. A SortNode is added if input is not already sorted.",
                         featuresConfig.isPreferSortMergeJoin(),
                         true),
+                booleanProperty(
+                        SORTED_EXCHANGE_ENABLED,
+                        "(Experimental) Enable pushing sort operations down to exchange nodes for distributed queries",
+                        featuresConfig.isSortedExchangeEnabled(),
+                        false),
                 booleanProperty(
                         SEGMENTED_AGGREGATION_ENABLED,
                         "Enable segmented aggregation.",
@@ -1602,6 +1641,11 @@ public final class SystemSessionProperties
                                 "output processing. This is to simplify the aggregation query OOM prevention in " +
                                 "output processing stage.",
                         true,
+                        false),
+                integerProperty(
+                        NATIVE_MAX_SPLIT_PRELOAD_PER_DRIVER,
+                        "Native Execution only. Maximum number of splits to preload per driver. Set to 0 to disable preloading.",
+                        0,
                         false),
                 booleanProperty(
                         NATIVE_EXECUTION_ENABLED,
@@ -1888,15 +1932,15 @@ public final class SystemSessionProperties
                 new PropertyMetadata<>(
                         DEFAULT_VIEW_SECURITY_MODE,
                         format("Set default view security mode. Options are: %s",
-                                Stream.of(CreateView.Security.values())
-                                        .map(CreateView.Security::name)
+                                Stream.of(ViewSecurity.values())
+                                        .map(ViewSecurity::name)
                                         .collect(joining(","))),
                         VARCHAR,
-                        CreateView.Security.class,
+                        ViewSecurity.class,
                         featuresConfig.getDefaultViewSecurityMode(),
                         false,
-                        value -> CreateView.Security.valueOf(((String) value).toUpperCase()),
-                        CreateView.Security::name),
+                        value -> ViewSecurity.valueOf(((String) value).toUpperCase()),
+                        ViewSecurity::name),
                 booleanProperty(
                         JOIN_PREFILTER_BUILD_SIDE,
                         "Prefiltering the build/inner side of a join with keys from the other side",
@@ -1918,6 +1962,10 @@ public final class SystemSessionProperties
                         "Include values node for connector optimizer",
                         featuresConfig.isIncludeValuesNodeInConnectorOptimizer(),
                         false),
+                booleanProperty(ENABLE_EMPTY_CONNECTOR_OPTIMIZER,
+                    "Run optimizers which optimize queries with values node",
+                    false,
+                    false),
                 booleanProperty(
                         INNER_JOIN_PUSHDOWN_ENABLED,
                         "Enable Join Predicate Pushdown",
@@ -1994,6 +2042,11 @@ public final class SystemSessionProperties
                         "Add distinct aggregation below semi join build",
                         featuresConfig.isAddDistinctBelowSemiJoinBuild(),
                         false));
+    }
+
+    public static int getMaxPrefixesCount(Session session)
+    {
+        return session.getSystemProperty(MAX_PREFIXES_COUNT, Integer.class);
     }
 
     public static boolean isSpoolingOutputBufferEnabled(Session session)
@@ -2882,6 +2935,16 @@ public final class SystemSessionProperties
         return session.getSystemProperty(QUERY_OPTIMIZATION_WITH_MATERIALIZED_VIEW_ENABLED, Boolean.class);
     }
 
+    public static boolean isLegacyMaterializedViews(Session session)
+    {
+        return session.getSystemProperty(LEGACY_MATERIALIZED_VIEWS, Boolean.class);
+    }
+
+    public static boolean isMaterializedViewAllowFullRefreshEnabled(Session session)
+    {
+        return session.getSystemProperty(MATERIALIZED_VIEW_ALLOW_FULL_REFRESH_ENABLED, Boolean.class);
+    }
+
     public static boolean isVerboseRuntimeStatsEnabled(Session session)
     {
         return session.getSystemProperty(VERBOSE_RUNTIME_STATS_ENABLED, Boolean.class);
@@ -2930,6 +2993,11 @@ public final class SystemSessionProperties
     public static boolean preferSortMergeJoin(Session session)
     {
         return session.getSystemProperty(PREFER_SORT_MERGE_JOIN, Boolean.class);
+    }
+
+    public static boolean isSortedExchangeEnabled(Session session)
+    {
+        return session.getSystemProperty(SORTED_EXCHANGE_ENABLED, Boolean.class);
     }
 
     public static boolean isSegmentedAggregationEnabled(Session session)
@@ -3280,9 +3348,9 @@ public final class SystemSessionProperties
         return session.getSystemProperty(EAGER_PLAN_VALIDATION_ENABLED, Boolean.class);
     }
 
-    public static CreateView.Security getDefaultViewSecurityMode(Session session)
+    public static ViewSecurity getDefaultViewSecurityMode(Session session)
     {
-        return session.getSystemProperty(DEFAULT_VIEW_SECURITY_MODE, CreateView.Security.class);
+        return session.getSystemProperty(DEFAULT_VIEW_SECURITY_MODE, ViewSecurity.class);
     }
 
     public static boolean isJoinPrefilterEnabled(Session session)
@@ -3320,6 +3388,11 @@ public final class SystemSessionProperties
         return session.getSystemProperty(INCLUDE_VALUES_NODE_IN_CONNECTOR_OPTIMIZER, Boolean.class);
     }
 
+    public static boolean isEmptyConnectorOptimizerEnabled(Session session)
+    {
+        return session.getSystemProperty(ENABLE_EMPTY_CONNECTOR_OPTIMIZER, Boolean.class);
+    }
+
     public static Boolean isInnerJoinPushdownEnabled(Session session)
     {
         return session.getSystemProperty(INNER_JOIN_PUSHDOWN_ENABLED, Boolean.class);
@@ -3338,6 +3411,11 @@ public final class SystemSessionProperties
     public static boolean isNativeExecutionScaleWritersThreadsEnabled(Session session)
     {
         return session.getSystemProperty(NATIVE_EXECUTION_SCALE_WRITER_THREADS_ENABLED, Boolean.class);
+    }
+
+    public static int getMaxSplitPreloadPerDriver(Session session)
+    {
+        return session.getSystemProperty(NATIVE_MAX_SPLIT_PRELOAD_PER_DRIVER, Integer.class);
     }
 
     public static boolean isNativeExecutionTypeRewriteEnabled(Session session)

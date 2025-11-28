@@ -37,6 +37,7 @@ import com.facebook.presto.hive.metastore.PrincipalPrivileges;
 import com.facebook.presto.hive.metastore.Table;
 import com.facebook.presto.iceberg.statistics.StatisticsFileCache;
 import com.facebook.presto.spi.ColumnHandle;
+import com.facebook.presto.spi.ColumnMetadata;
 import com.facebook.presto.spi.ConnectorNewTableLayout;
 import com.facebook.presto.spi.ConnectorOutputTableHandle;
 import com.facebook.presto.spi.ConnectorSession;
@@ -46,6 +47,7 @@ import com.facebook.presto.spi.ConnectorTableLayoutHandle;
 import com.facebook.presto.spi.ConnectorTableMetadata;
 import com.facebook.presto.spi.ConnectorViewDefinition;
 import com.facebook.presto.spi.Constraint;
+import com.facebook.presto.spi.MaterializedViewDefinition;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.SchemaNotFoundException;
 import com.facebook.presto.spi.SchemaTableName;
@@ -124,7 +126,7 @@ import static com.facebook.presto.iceberg.IcebergTableProperties.getSortOrder;
 import static com.facebook.presto.iceberg.IcebergTableProperties.getTableLocation;
 import static com.facebook.presto.iceberg.IcebergTableType.DATA;
 import static com.facebook.presto.iceberg.IcebergUtil.createIcebergViewProperties;
-import static com.facebook.presto.iceberg.IcebergUtil.getColumns;
+import static com.facebook.presto.iceberg.IcebergUtil.getColumnsForWrite;
 import static com.facebook.presto.iceberg.IcebergUtil.getHiveIcebergTable;
 import static com.facebook.presto.iceberg.IcebergUtil.isIcebergTable;
 import static com.facebook.presto.iceberg.IcebergUtil.populateTableProperties;
@@ -178,6 +180,7 @@ public class IcebergHiveMetadata
             StandardFunctionResolution functionResolution,
             RowExpressionService rowExpressionService,
             JsonCodec<CommitTaskData> commitTaskCodec,
+            JsonCodec<List<MaterializedViewDefinition.ColumnMapping>> columnMappingsCodec,
             NodeVersion nodeVersion,
             FilterStatsCalculatorService filterStatsCalculatorService,
             IcebergHiveTableOperationsConfig hiveTableOperationsConfig,
@@ -186,7 +189,7 @@ public class IcebergHiveMetadata
             IcebergTableProperties tableProperties,
             ConnectorSystemConfig connectorSystemConfig)
     {
-        super(typeManager, functionResolution, rowExpressionService, commitTaskCodec, nodeVersion, filterStatsCalculatorService, statisticsFileCache, tableProperties);
+        super(typeManager, functionResolution, rowExpressionService, commitTaskCodec, columnMappingsCodec, nodeVersion, filterStatsCalculatorService, statisticsFileCache, tableProperties);
         this.catalogName = requireNonNull(catalogName, "catalogName is null");
         this.metastore = requireNonNull(metastore, "metastore is null");
         this.hdfsEnvironment = requireNonNull(hdfsEnvironment, "hdfsEnvironment is null");
@@ -390,7 +393,7 @@ public class IcebergHiveMetadata
                 new IcebergTableName(tableName, DATA, Optional.empty(), Optional.empty()),
                 toPrestoSchema(metadata.schema(), typeManager),
                 toPrestoPartitionSpec(metadata.spec(), typeManager),
-                getColumns(metadata.schema(), metadata.spec(), typeManager),
+                getColumnsForWrite(metadata.schema(), metadata.spec(), typeManager),
                 targetPath,
                 fileFormat,
                 getCompressionCodec(session),
@@ -691,5 +694,31 @@ public class IcebergHiveMetadata
     {
         MetastoreContext metastoreContext = getMetastoreContext(clientSession);
         metastore.dropTableFromMetastore(metastoreContext, schemaTableName.getSchemaName(), schemaTableName.getTableName());
+    }
+
+    @Override
+    protected void createIcebergView(
+            ConnectorSession session,
+            SchemaTableName viewName,
+            List<ColumnMetadata> columns,
+            String viewSql,
+            Map<String, String> properties)
+    {
+        throw new PrestoException(NOT_SUPPORTED, "Iceberg Hive catalog does not support native Iceberg views for materialized views.");
+    }
+
+    @Override
+    protected void dropIcebergView(ConnectorSession session, SchemaTableName schemaTableName)
+    {
+        throw new PrestoException(NOT_SUPPORTED, "Iceberg Hive catalog does not support native Iceberg views for materialized views.");
+    }
+
+    @Override
+    protected void updateIcebergViewProperties(
+            ConnectorSession session,
+            SchemaTableName viewName,
+            Map<String, String> properties)
+    {
+        throw new PrestoException(NOT_SUPPORTED, "Iceberg Hive catalog does not support native Iceberg views for materialized views.");
     }
 }

@@ -30,8 +30,10 @@ import com.facebook.presto.metadata.Catalog.CatalogContext;
 import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.ColumnMetadata;
 import com.facebook.presto.spi.ConnectorDeleteTableHandle;
+import com.facebook.presto.spi.ConnectorDistributedProcedureHandle;
 import com.facebook.presto.spi.ConnectorId;
 import com.facebook.presto.spi.ConnectorInsertTableHandle;
+import com.facebook.presto.spi.ConnectorMergeTableHandle;
 import com.facebook.presto.spi.ConnectorOutputTableHandle;
 import com.facebook.presto.spi.ConnectorResolvedIndex;
 import com.facebook.presto.spi.ConnectorSession;
@@ -43,6 +45,7 @@ import com.facebook.presto.spi.ConnectorViewDefinition;
 import com.facebook.presto.spi.Constraint;
 import com.facebook.presto.spi.MaterializedViewDefinition;
 import com.facebook.presto.spi.MaterializedViewStatus;
+import com.facebook.presto.spi.MergeHandle;
 import com.facebook.presto.spi.NewTableLayout;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.QueryId;
@@ -61,10 +64,12 @@ import com.facebook.presto.spi.connector.ConnectorPartitioningHandle;
 import com.facebook.presto.spi.connector.ConnectorPartitioningMetadata;
 import com.facebook.presto.spi.connector.ConnectorTableVersion;
 import com.facebook.presto.spi.connector.ConnectorTransactionHandle;
+import com.facebook.presto.spi.connector.RowChangeParadigm;
 import com.facebook.presto.spi.connector.TableFunctionApplicationResult;
 import com.facebook.presto.spi.constraints.TableConstraint;
 import com.facebook.presto.spi.function.SqlFunction;
 import com.facebook.presto.spi.plan.PartitioningHandle;
+import com.facebook.presto.spi.procedure.ProcedureRegistry;
 import com.facebook.presto.spi.relation.RowExpression;
 import com.facebook.presto.spi.relation.VariableReferenceExpression;
 import com.facebook.presto.spi.security.GrantInfo;
@@ -174,6 +179,30 @@ public class MetadataManager
             TransactionManager transactionManager)
     {
         this(
+                functionAndTypeManager,
+                blockEncodingSerde,
+                sessionPropertyManager,
+                schemaPropertyManager,
+                tablePropertyManager,
+                columnPropertyManager,
+                analyzePropertyManager,
+                transactionManager,
+                new BuiltInProcedureRegistry(functionAndTypeManager));
+    }
+
+    @VisibleForTesting
+    public MetadataManager(
+            FunctionAndTypeManager functionAndTypeManager,
+            BlockEncodingSerde blockEncodingSerde,
+            SessionPropertyManager sessionPropertyManager,
+            SchemaPropertyManager schemaPropertyManager,
+            TablePropertyManager tablePropertyManager,
+            ColumnPropertyManager columnPropertyManager,
+            AnalyzePropertyManager analyzePropertyManager,
+            TransactionManager transactionManager,
+            ProcedureRegistry procedureRegistry)
+    {
+        this(
                 createTestingViewCodec(functionAndTypeManager),
                 blockEncodingSerde,
                 sessionPropertyManager,
@@ -182,7 +211,8 @@ public class MetadataManager
                 columnPropertyManager,
                 analyzePropertyManager,
                 transactionManager,
-                functionAndTypeManager);
+                functionAndTypeManager,
+                procedureRegistry);
     }
 
     @Inject
@@ -195,7 +225,8 @@ public class MetadataManager
             ColumnPropertyManager columnPropertyManager,
             AnalyzePropertyManager analyzePropertyManager,
             TransactionManager transactionManager,
-            FunctionAndTypeManager functionAndTypeManager)
+            FunctionAndTypeManager functionAndTypeManager,
+            ProcedureRegistry procedureRegistry)
     {
         this.viewCodec = requireNonNull(viewCodec, "viewCodec is null");
         this.blockEncodingSerde = requireNonNull(blockEncodingSerde, "blockEncodingSerde is null");
@@ -206,7 +237,7 @@ public class MetadataManager
         this.analyzePropertyManager = requireNonNull(analyzePropertyManager, "analyzePropertyManager is null");
         this.transactionManager = requireNonNull(transactionManager, "transactionManager is null");
         this.functionAndTypeManager = requireNonNull(functionAndTypeManager, "functionManager is null");
-        this.procedures = new ProcedureRegistry(functionAndTypeManager);
+        this.procedures = requireNonNull(procedureRegistry, "procedureRegistry is null");
 
         verifyComparableOrderableContract();
     }
@@ -253,6 +284,21 @@ public class MetadataManager
                 new ColumnPropertyManager(),
                 new AnalyzePropertyManager(),
                 transactionManager);
+    }
+
+    public static MetadataManager createTestMetadataManager(TransactionManager transactionManager, FeaturesConfig featuresConfig, FunctionsConfig functionsConfig, ProcedureRegistry procedureRegistry)
+    {
+        BlockEncodingManager blockEncodingManager = new BlockEncodingManager();
+        return new MetadataManager(
+                new FunctionAndTypeManager(transactionManager, new TableFunctionRegistry(), blockEncodingManager, featuresConfig, functionsConfig, new HandleResolver(), ImmutableSet.of()),
+                blockEncodingManager,
+                createTestingSessionPropertyManager(),
+                new SchemaPropertyManager(),
+                new TablePropertyManager(),
+                new ColumnPropertyManager(),
+                new AnalyzePropertyManager(),
+                transactionManager,
+                procedureRegistry);
     }
 
     @Override
@@ -922,6 +968,14 @@ public class MetadataManager
     }
 
     @Override
+    public ColumnHandle getMergeTargetTableRowIdColumnHandle(Session session, TableHandle tableHandle)
+    {
+        ConnectorId connectorId = tableHandle.getConnectorId();
+        ConnectorMetadata metadata = getMetadata(session, connectorId);
+        return metadata.getMergeTargetTableRowIdColumnHandle(session.toConnectorSession(connectorId), tableHandle.getConnectorHandle());
+    }
+
+    @Override
     public boolean supportsMetadataDelete(Session session, TableHandle tableHandle)
     {
         ConnectorId connectorId = tableHandle.getConnectorId();
@@ -961,6 +1015,40 @@ public class MetadataManager
     }
 
     @Override
+    public DistributedProcedureHandle beginCallDistributedProcedure(Session session, QualifiedObjectName procedureName, TableHandle tableHandle, Object[] arguments)
+    {
+        ConnectorId connectorId = tableHandle.getConnectorId();
+        CatalogMetadata catalogMetadata = getCatalogMetadataForWrite(session, connectorId);
+
+        ConnectorTableLayoutHandle layout;
+        if (!tableHandle.getLayout().isPresent()) {
+            TableLayoutResult result = getLayout(session, tableHandle, Constraint.alwaysTrue(), Optional.empty());
+            layout = result.getLayout().getLayoutHandle();
+        }
+        else {
+            layout = tableHandle.getLayout().get();
+        }
+
+        ConnectorDistributedProcedureHandle procedureHandle = catalogMetadata.getMetadata().beginCallDistributedProcedure(
+                session.toConnectorSession(connectorId),
+                procedureName,
+                layout,
+                arguments);
+        return new DistributedProcedureHandle(
+                tableHandle.getConnectorId(),
+                tableHandle.getTransaction(),
+                procedureHandle);
+    }
+
+    @Override
+    public void finishCallDistributedProcedure(Session session, DistributedProcedureHandle procedureHandle, QualifiedObjectName procedureName, Collection<Slice> fragments)
+    {
+        ConnectorId connectorId = procedureHandle.getConnectorId();
+        ConnectorMetadata metadata = getMetadata(session, connectorId);
+        metadata.finishCallDistributedProcedure(session.toConnectorSession(connectorId), procedureHandle.getConnectorHandle(), procedureName, fragments);
+    }
+
+    @Override
     public TableHandle beginUpdate(Session session, TableHandle tableHandle, List<ColumnHandle> updatedColumns)
     {
         ConnectorId connectorId = tableHandle.getConnectorId();
@@ -975,6 +1063,35 @@ public class MetadataManager
         ConnectorId connectorId = tableHandle.getConnectorId();
         ConnectorMetadata metadata = getMetadata(session, connectorId);
         metadata.finishUpdate(session.toConnectorSession(connectorId), tableHandle.getConnectorHandle(), fragments);
+    }
+
+    @Override
+    public RowChangeParadigm getRowChangeParadigm(Session session, TableHandle tableHandle)
+    {
+        ConnectorId connectorId = tableHandle.getConnectorId();
+        ConnectorMetadata metadata = getMetadata(session, connectorId);
+        return metadata.getRowChangeParadigm(session.toConnectorSession(connectorId), tableHandle.getConnectorHandle());
+    }
+
+    @Override
+    public MergeHandle beginMerge(Session session, TableHandle tableHandle)
+    {
+        ConnectorId connectorId = tableHandle.getConnectorId();
+        ConnectorMetadata metadata = getMetadataForWrite(session, connectorId);
+        ConnectorMergeTableHandle newHandle = metadata.beginMerge(session.toConnectorSession(connectorId), tableHandle.getConnectorHandle());
+        return new MergeHandle(tableHandle.cloneWithConnectorHandle(newHandle.getTableHandle()), newHandle);
+    }
+
+    @Override
+    public void finishMerge(
+            Session session,
+            MergeHandle mergeHandle,
+            Collection<Slice> fragments,
+            Collection<ComputedStatistics> computedStatistics)
+    {
+        ConnectorId connectorId = mergeHandle.getTableHandle().getConnectorId();
+        ConnectorMetadata metadata = getMetadata(session, connectorId);
+        metadata.finishMerge(session.toConnectorSession(connectorId), mergeHandle.getConnectorMergeTableHandle(), fragments, computedStatistics);
     }
 
     @Override

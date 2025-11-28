@@ -2469,9 +2469,6 @@ public class HiveMetadata
         Map<SchemaTableName, Map<String, String>> viewToBasePartitionMap = getViewToBasePartitionMap(materializedViewTable, baseTables, directColumnMappings);
 
         MaterializedDataPredicates materializedDataPredicates = getMaterializedDataPredicates(metastore, metastoreContext, typeManager, materializedViewTable, timeZone);
-        if (materializedDataPredicates.getPredicateDisjuncts().isEmpty()) {
-            return new MaterializedViewStatus(NOT_MATERIALIZED);
-        }
 
         // Partitions to keep track of for materialized view freshness are the partitions of every base table
         // that are not available/updated to the materialized view yet.
@@ -2494,13 +2491,15 @@ public class HiveMetadata
 
         for (MaterializedDataPredicates dataPredicates : partitionsFromBaseTables.values()) {
             if (!dataPredicates.getPredicateDisjuncts().isEmpty()) {
-                missingPartitions += dataPredicates.getPredicateDisjuncts().stream()
+                missingPartitions += (int) dataPredicates.getPredicateDisjuncts().stream()
                         .filter(baseQueryDomain::overlaps)
-                        .mapToInt(tupleDomain -> tupleDomain.getDomains().isPresent() ? tupleDomain.getDomains().get().size() : 0)
-                        .sum();
+                        .count();
             }
         }
 
+        if (materializedDataPredicates.getPredicateDisjuncts().isEmpty()) {
+            return new MaterializedViewStatus(NOT_MATERIALIZED, partitionsFromBaseTables);
+        }
         if (missingPartitions > HiveSessionProperties.getMaterializedViewMissingPartitionsThreshold(session)) {
             return new MaterializedViewStatus(TOO_MANY_PARTITIONS_MISSING, partitionsFromBaseTables);
         }
@@ -2525,6 +2524,7 @@ public class HiveMetadata
                 viewDefinition.getTable(),
                 viewDefinition.getBaseTables(),
                 viewDefinition.getOwner(),
+                viewDefinition.getSecurityMode(),
                 viewDefinition.getColumnMappings(),
                 viewDefinition.getBaseTablesOnOuterJoinSide(),
                 Optional.of(getPartitionedBy(viewMetadata.getProperties())));

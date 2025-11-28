@@ -21,7 +21,7 @@
 using namespace std::string_literals;
 
 namespace facebook::presto::protocol::iceberg {
-// Loosly copied this here from NLOHMANN_JSON_SERIALIZE_ENUM()
+// Loosely copied this here from NLOHMANN_JSON_SERIALIZE_ENUM()
 
 // NOLINTNEXTLINE: cppcoreguidelines-avoid-c-arrays
 static const std::pair<ChangelogOperation, json>
@@ -63,7 +63,7 @@ void from_json(const json& j, ChangelogOperation& e) {
 }
 } // namespace facebook::presto::protocol::iceberg
 namespace facebook::presto::protocol::iceberg {
-// Loosly copied this here from NLOHMANN_JSON_SERIALIZE_ENUM()
+// Loosely copied this here from NLOHMANN_JSON_SERIALIZE_ENUM()
 
 // NOLINTNEXTLINE: cppcoreguidelines-avoid-c-arrays
 static const std::pair<TypeCategory, json> TypeCategory_enum_table[] =
@@ -260,7 +260,7 @@ void from_json(const json& j, ChangelogSplitInfo& p) {
 }
 } // namespace facebook::presto::protocol::iceberg
 namespace facebook::presto::protocol::iceberg {
-// Loosly copied this here from NLOHMANN_JSON_SERIALIZE_ENUM()
+// Loosely copied this here from NLOHMANN_JSON_SERIALIZE_ENUM()
 
 // NOLINTNEXTLINE: cppcoreguidelines-avoid-c-arrays
 static const std::pair<FileContent, json> FileContent_enum_table[] =
@@ -298,7 +298,7 @@ void from_json(const json& j, FileContent& e) {
 }
 } // namespace facebook::presto::protocol::iceberg
 namespace facebook::presto::protocol::iceberg {
-// Loosly copied this here from NLOHMANN_JSON_SERIALIZE_ENUM()
+// Loosely copied this here from NLOHMANN_JSON_SERIALIZE_ENUM()
 
 // NOLINTNEXTLINE: cppcoreguidelines-avoid-c-arrays
 static const std::pair<FileFormat, json> FileFormat_enum_table[] =
@@ -411,7 +411,7 @@ void from_json(const json& j, DeleteFile& p) {
 }
 } // namespace facebook::presto::protocol::iceberg
 namespace facebook::presto::protocol::iceberg {
-// Loosly copied this here from NLOHMANN_JSON_SERIALIZE_ENUM()
+// Loosely copied this here from NLOHMANN_JSON_SERIALIZE_ENUM()
 
 // NOLINTNEXTLINE: cppcoreguidelines-avoid-c-arrays
 static const std::pair<IcebergTableType, json> IcebergTableType_enum_table[] =
@@ -505,17 +505,17 @@ void from_json(const json& j, IcebergTableName& p) {
 }
 } // namespace facebook::presto::protocol::iceberg
 namespace facebook::presto::protocol::iceberg {
-// Loosly copied this here from NLOHMANN_JSON_SERIALIZE_ENUM()
+// Loosely copied this here from NLOHMANN_JSON_SERIALIZE_ENUM()
 
 // NOLINTNEXTLINE: cppcoreguidelines-avoid-c-arrays
 static const std::pair<PartitionTransformType, json>
     PartitionTransformType_enum_table[] =
         { // NOLINT: cert-err58-cpp
             {PartitionTransformType::IDENTITY, "IDENTITY"},
-            {PartitionTransformType::YEAR, "YEAR"},
-            {PartitionTransformType::MONTH, "MONTH"},
-            {PartitionTransformType::DAY, "DAY"},
             {PartitionTransformType::HOUR, "HOUR"},
+            {PartitionTransformType::DAY, "DAY"},
+            {PartitionTransformType::MONTH, "MONTH"},
+            {PartitionTransformType::YEAR, "YEAR"},
             {PartitionTransformType::BUCKET, "BUCKET"},
             {PartitionTransformType::TRUNCATE, "TRUNCATE"}};
 void to_json(json& j, const PartitionTransformType& e) {
@@ -845,6 +845,13 @@ void to_json(json& j, const IcebergInsertTableHandle& p) {
       "IcebergInsertTableHandle",
       "List<SortField>",
       "sortOrder");
+  to_json_key(
+      j,
+      "materializedViewName",
+      p.materializedViewName,
+      "IcebergInsertTableHandle",
+      "SchemaTableName",
+      "materializedViewName");
 }
 
 void from_json(const json& j, IcebergInsertTableHandle& p) {
@@ -919,6 +926,13 @@ void from_json(const json& j, IcebergInsertTableHandle& p) {
       "IcebergInsertTableHandle",
       "List<SortField>",
       "sortOrder");
+  from_json_key(
+      j,
+      "materializedViewName",
+      p.materializedViewName,
+      "IcebergInsertTableHandle",
+      "SchemaTableName",
+      "materializedViewName");
 }
 } // namespace facebook::presto::protocol::iceberg
 namespace facebook::presto::protocol::iceberg {
@@ -1317,6 +1331,13 @@ void to_json(json& j, const IcebergTableHandle& p) {
       "IcebergTableHandle",
       "List<IcebergColumnHandle>",
       "updatedColumns");
+  to_json_key(
+      j,
+      "materializedViewName",
+      p.materializedViewName,
+      "IcebergTableHandle",
+      "SchemaTableName",
+      "materializedViewName");
 }
 
 void from_json(const json& j, IcebergTableHandle& p) {
@@ -1391,6 +1412,13 @@ void from_json(const json& j, IcebergTableHandle& p) {
       "IcebergTableHandle",
       "List<IcebergColumnHandle>",
       "updatedColumns");
+  from_json_key(
+      j,
+      "materializedViewName",
+      p.materializedViewName,
+      "IcebergTableHandle",
+      "SchemaTableName",
+      "materializedViewName");
 }
 } // namespace facebook::presto::protocol::iceberg
 namespace facebook::presto::protocol::iceberg {
